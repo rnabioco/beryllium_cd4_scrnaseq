@@ -1,0 +1,1468 @@
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+# loading data
+
+```{r}
+s29 <- Read10X(data.dir = "/Users/rf/yang2/29_2/filtered_feature_bc_matrix")
+s45 <- Read10X(data.dir = "/Users/rf/yang2/45_1/filtered_feature_bc_matrix")
+
+# initialize seurat object
+s29 <- CreateSeuratObject(counts = s29, project = "s29", min.cells = 3, min.features = 200)
+s45 <- CreateSeuratObject(counts = s45, project = "s45", min.cells = 3, min.features = 200)
+
+# calculate mt
+s29[["percent.mt"]] <- PercentageFeatureSet(s29, pattern = "^MT-")
+s45[["percent.mt"]] <- PercentageFeatureSet(s45, pattern = "^MT-")
+
+# filter out bad cells
+s29 <- subset(s29, subset = nFeature_RNA > 500 & nFeature_RNA < 7000 & percent.mt < 20)
+s45 <- subset(s45, subset = nFeature_RNA > 500 & nFeature_RNA < 7000 & percent.mt < 20)
+```
+
+```{r}
+p1 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593888_sample_1_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p1") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p2 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593889_sample_2_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p2") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p3 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593890_sample_3_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p3") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p4 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593891_sample_4_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p4") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p5 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593892_sample_5_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p5") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p6 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593893_sample_6_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p6") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p7 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593894_sample_7_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p7") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p8 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593895_sample_8_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p8") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p9 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593896_sample_9_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p9") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+p10 <- read_csv("/Users/rf/Downloads/GSE151928_RAW/GSM4593897_sample_10_UMI_counts.csv.gz") %>%
+  column_to_rownames("X1") %>%
+  CreateSeuratObject(project = "p10") %>% 
+  subset(subset = nFeature_RNA > 500 & nFeature_RNA < 7000)
+
+pall <- merge(p1, list(p2, p3, p4, p5, p6, p7, p8, p9, p10))
+saveRDS(pall, "pall.rds")
+pall <- readRDS("/Users/rf/pall.rds")
+pall[["percent.mt"]] <- PercentageFeatureSet(pall, pattern = "^MT-")
+pall <- subset(pall, subset = nFeature_RNA > 500 & nFeature_RNA < 7000 & percent.mt < 20)
+```
+
+# cell counts
+
+```{r}
+counts <- int@meta.data %>% group_by(orig.ident) %>% tally()
+totals <- c(s29 = ncol(s29), s45 = ncol(s45))
+tps <- sapply(1:10, function(x) {
+  read_csv(paste0("/Users/rf/Downloads/GSE151928_RAW/GSM", 4593887 + x, "_sample_", x, "_UMI_counts.csv.gz"), n_max = 3) %>% ncol() -1
+})
+names(tps) <- str_c("p", 1:10)
+c(tps, totals)[rownames(counts)]
+
+counts$total <- c(tps, totals)[counts$orig.ident]
+
+counts %>% mutate(fraction_passfilter = n/total) %>% 
+  write_tsv("filter_fractions.tsv")
+  
+```
+
+# without integration
+
+```{r}
+p_all <- merge(pall, list(s29, s45))
+
+int <- NormalizeData(p_all)
+int <- FindVariableFeatures(int)
+int <- ScaleData(int, verbose = FALSE)
+int <- RunPCA(int, npcs = 30, verbose = FALSE)
+int <- RunUMAP(int, reduction = "pca", dims = 1:30)
+int <- FindNeighbors(object = int, dims = 1:30)
+int <- FindClusters(int, dims.use = 1:40, resolution = 1)
+DefaultAssay(int) <- "RNA"
+saveRDS(int, "mergeall.rds")
+
+library(clustifyr)
+intc <- clustify(int,
+                 cbmc_ref,
+                 cluster_col = "seurat_clusters",
+                 query_genes = int@assays$RNA@var.features[1:800],
+                 threshold = 0.2)
+DimPlot(intc, group.by = "type", label = T)
+
+a <- DimPlot(int, label = T, group.by = "orig.ident")
+b <- FeaturePlot(int, "CD3D")
+cowplot::plot_grid(a, b)
+ggsave("without_integration.pdf", height = 6, width = 12)
+```
+
+# integration
+
+```{r}
+res <- sapply(list(s29,s45, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10), function(sample.tmp.seurat) {
+  sample.tmp.seurat[['percent.mito']] <- PercentageFeatureSet(sample.tmp.seurat, pattern = "^MT-")
+  sample.tmp.seurat <- NormalizeData(sample.tmp.seurat, verbose = FALSE)
+  sample.tmp.seurat <- FindVariableFeatures(sample.tmp.seurat,
+                                            selection.method = "vst", 
+                                            nfeatures = 2000,verbose = FALSE)
+  sample.tmp.seurat
+}, simplify = F)
+names(res) <- c("s29", "s45", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10")
+
+int <- FindIntegrationAnchors(object.list = res, dims = 1:50)
+saveRDS(int, "found.rds")
+int <- readRDS("found.rds")
+int <- IntegrateData(anchorset = int, dims = 1:50, features.to.integrate = rownames(int))
+
+int <- ScaleData(int, verbose = FALSE)
+int <- RunPCA(int, verbose = FALSE)
+int <- RunUMAP(int, reduction = "pca", dims = 1:30)
+int <- FindNeighbors(object = int, dims = 1:30)
+int <- FindClusters(int, dims.use = 1:40, resolution = 1)
+DefaultAssay(int) <- "RNA"
+saveRDS(int, "intall.rds")
+
+int <- readRDS("intall.rds")
+int$sample <- factor(int$orig.ident, levels = c("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "s29", "s45"))
+a <- DimPlot(int, label = F, group.by = "sample") +
+    theme(plot.title = element_text(face = "plain"))
+b <- FeaturePlot(int, "CD3D") +
+    theme(plot.title = element_text(face = "plain")) + labs(color='Expr')
+p <- cowplot::plot_grid(a, b)
+# ggsave("with_integration_nolab.pdf", height = 6, width = 12)
+ggsave("with_integration_nolab_resize_final.pdf", height = 4, width = 8)
+
+saveRDS(int_cd3, "int_cd3.rds")
+
+int@meta.data %>% 
+  rownames_to_column("id") %>% 
+  select(-percent.mt, -seurat_clusters) %>% 
+  write_tsv("metadata.tsv")
+
+int@meta.data %>% 
+  rownames_to_column("id") %>% 
+  mutate(cd3 = ifelse(seurat_clusters %in% c(7,9,10,21,29), "cd3", "not")) %>% 
+  mutate(type = case_when(
+    orig.ident == "s29" ~ "BeS",
+    orig.ident == "s45" ~ "CBD",
+    str_detect(orig.ident, "^p") ~ "healthy",
+    T ~ "healthy_a"
+  )) %>% 
+  group_by(type, cd3) %>% 
+  summarize(n = n()) %>% 
+  group_by(type) %>% 
+  mutate(n = n/sum(n)) %>% 
+  pivot_wider(values_from = "n", names_from = "cd3") %>% 
+  write_tsv("count_allcells.tsv")
+```
+
+# subsetting and reclustering
+
+```{r}
+int <- readRDS("intall.rds")
+int@meta.data %>% View()
+int_cd3 <- subset(int, idents = c(7,9,10,21,29))
+int_cd3@meta.data$type <- int_cd3@meta.data %>% 
+  mutate(type = case_when(
+    orig.ident == "s29" ~ "BeS",
+    orig.ident == "s45" ~ "CBD",
+    str_detect(orig.ident, "^p") ~ "healthy",
+    T ~ "healthy_a"
+  )) %>% 
+  pull(type)
+
+# new resolution
+DefaultAssay(int_cd3) <- "integrated"
+int_cd3 <- RunPCA(int_cd3, npcs = 30, verbose = FALSE)
+int_cd3  <- RunUMAP(int_cd3 , reduction = "pca", dims = 1:30)
+int_cd3  <- FindNeighbors(object = int_cd3 , dims = 1:30)
+int_cd3  <- FindClusters(int_cd3, dims.use = 1:40, resolution = 1)
+DefaultAssay(int_cd3) <- "RNA"
+a <- DimPlot(int_cd3, label = T)
+b <- FeaturePlot(int_cd3, c("CD4", "CD8A", "FOXP3"), order = TRUE)
+cowplot::plot_grid(a,b)
+
+# cell types
+int_cd3 <- RenameIdents(int_cd3,
+                            "8" = "NK",
+                            "0" = "CD8",
+                            "4" = "CD8",
+                            "7" = "CD8",
+                            "9" = "Treg",
+                            "1" = "CD4",
+                            "2" = "CD4",
+                            "3" = "CD4",
+                            "5" = "CD4",
+                            "6" = "CD4",
+                            "9" = "CD4",
+                            "10" = "X")
+int_cd3 <- StashIdent(int_cd3, "celltype")
+int_cd3$clusters <- int_cd3$seurat_clusters
+Idents(int_cd3) <- "seurat_clusters"
+int_cd3 <- RenameIdents(int_cd3,
+                        "0" = "CD8_7",
+                        "1" = "CD4_4",
+                        "2" = "CD4_2",
+                        "3" = "CD4_3",
+                        "4" = "CD8_8",
+                        "5" = "CD4_1",
+                        "6" = "CD4_5",
+                        "7" = "CD8_9",
+                        "8" = "NK_10",
+                        "9" = "Treg_6",
+                        "10" = "X")
+int_cd3 <- StashIdent(int_cd3, "clusters")
+Idents(int_cd3) <- "seurat_clusters"
+int_cd3 <- RenameIdents(int_cd3,
+                        "0" = "7",
+                        "1" = "4",
+                        "2" = "2",
+                        "3" = "3",
+                        "4" = "8",
+                        "5" = "1",
+                        "6" = "5",
+                        "7" = "9",
+                        "8" = "10",
+                        "9" = "6",
+                        "10" = "11")
+
+a <- DimPlot(int_cd3, label = T, group.by = "seurat_clusters") + NoLegend() +
+    theme(plot.title = element_text(face = "plain"))
+b <- FeaturePlot(int_cd3, c("CD4", "CD8A", "FOXP3"), order = TRUE)
+c <- DimPlot(int_cd3, label = T, group.by = "celltype") + NoLegend() +
+    theme(plot.title = element_text(face = "plain"))
+cowplot::plot_grid(a,c)
+ggsave("cd3_resized_renamed_final.pdf", height = 4, width = 8)
+
+int_cd3 <- NormalizeData(int_cd3, assay = "RNA")
+int_cd3 <- ScaleData(int_cd3, assay = "RNA")
+
+saveRDS(int_cd3, "int_cd3_053121.rds")
+```
+
+# clustifyr
+
+```{r}
+int_cd3_sub <- readRDS("int_cd3_sub_021621.rds")
+library(clustifyr)
+library(M3Drop)
+Normalized_data <- M3DropCleanData(int_cd3_sub@assays$RNA@counts,
+                                   labels = rownames(int_cd3_sub@assays$RNA@counts),
+                                   is.counts = TRUE,
+                                   suppress.plot = TRUE)
+fits <- M3DropDropoutModels(Normalized_data$data, suppress.plot = TRUE)
+markers_M3Drop <- M3DropFeatureSelection(Normalized_data$data,
+                                         mt_method = "fdr",
+                                         mt_threshold = 0.01,
+                                         suppress.plot = TRUE)
+immgen_H <- clustifyrdata::ref_immgen
+rownames(immgen_H) <- str_to_upper(rownames(immgen_H))
+res <- clustifyr::clustify(
+  int_cd3_sub@assays$RNA@counts,
+  int_cd3_sub@meta.data,
+  cluster_col = "seurat_clusters",
+  ref_mat = immgen_H,
+  query_genes = markers_M3Drop$Gene,
+  rename_prefix = "clustifyr"
+)
+res2 <- clustifyr::cor_to_call(res, 
+                       int_cd3_sub@meta.data,
+                       cluster_col = "seurat_clusters")
+res3 <- call_to_metadata(res2, int_cd3_sub@meta.data, "seurat_clusters")
+int_cd3_sub@meta.data$clustifyr <- res3$type.clustify
+DimPlot(int_cd3_sub, label = T, group.by = "clustifyr")
+FeaturePlot(int_cd3_sub, str_c("TRDV", 1:11))
+
+FeaturePlot(int_cd3_sub, c("IL7R", "CD4", "CD8A"))
+```
+
+# table of fractions per sample
+
+```{r}
+int_cd3@meta.data %>% 
+  group_by(type, celltype) %>% 
+  tally() %>% 
+  group_by(type) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = celltype) %>% 
+  write_tsv("condition_fractions.tsv")
+
+int_cd3@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% 
+  group_by(type2, celltype) %>% 
+  tally() %>% 
+  group_by(type2) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = celltype) %>% 
+  write_tsv("condition_fractions_combined.tsv")
+
+int_cd3@meta.data %>% 
+  filter(celltype == "CD4") %>% 
+  group_by(type, seurat_clusters) %>% 
+  tally() %>% 
+  group_by(type) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = seurat_clusters) %>% 
+  write_tsv("cd4_condition_cluster_fractions.tsv")
+
+int_cd3@meta.data %>% 
+  mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% 
+  filter(celltype == "CD4") %>% 
+  group_by(type2, seurat_clusters) %>% 
+  tally() %>% 
+  group_by(type2) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = seurat_clusters) %>% 
+  write_tsv("cd4_condition_cluster_fractions_combined.tsv")
+
+int_cd3@meta.data %>% 
+  mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% 
+  filter(celltype %in% c("CD4", "Treg")) %>% 
+  group_by(type2, seurat_clusters) %>% 
+  tally() %>% 
+  group_by(type2) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = seurat_clusters) %>% 
+  write_tsv("cd4treg_condition_cluster_fractions_combined.tsv")
+
+int_cd3@meta.data %>% group_by(orig.ident, celltype) %>% 
+  tally() %>% 
+  group_by(orig.ident) %>% 
+  mutate(n = n/sum(n)) %>% 
+  ungroup() %>% 
+  pivot_wider(values_from = n, names_from = celltype) %>% 
+  write_tsv("sample_fractions.tsv")
+```
+
+# markers
+
+```{r}
+FeaturePlot(int_cd3, c("NCR1", "CD160", "KLRC3", "CD244", "KLRF1", "XCL2", "PRF1", "KLRC1", "IL18RAP"), order = TRUE, ncol = 2)
+ggsave("nk_signature.pdf", height = 30, width = 12)
+
+FeaturePlot(int_cd3, c("CD3D"), order = TRUE, ncol = 2)
+ggsave("cd3_signature.pdf", height = 5, width = 6)
+
+FeaturePlot(int_cd3, c("CCR7", "SELL", "KLF2", "LEF1", "TCF7"), order = TRUE, ncol = 2)
+ggsave("cd4resting_signature.pdf", height = 15, width = 12)
+
+FeaturePlot(int_cd3, c("IL2", "TNF", "IL4R", "IFNG", "CCL4", "CCL3", "IL2", "LIF", "IFIT3", "IFIT2", "STAT1", "MX1", "IRF7", "JAK2"), order = TRUE, ncol = 2)
+ggsave("cd4activating_signature.pdf", height = 35, width = 12)
+
+FeaturePlot(int_cd3, c("FOXP3", "IL2RA", "CD160", "NOG", "PRDM1", "IL32", "TNRSF4", "CTLA4"), order = TRUE, ncol = 2)
+ggsave("treg_signature.pdf", height = 20, width = 12)
+
+FeaturePlot(int_cd3, c("PRF1", "NKG7", "CENPV", "G0S2", "ORC6"), order = TRUE, ncol = 2)
+ggsave("effector_signature.pdf", height = 15, width = 12)
+
+FeaturePlot(int_cd3, c("GNLY", "GZMK"), order = TRUE, ncol = 2)
+ggsave("cytotoxiccd8_signature.pdf", height = 5, width = 12)
+
+FeaturePlot(int_cd3, c("ZEB2", "EOMES", "ZNF683", "HOPX49"), order = TRUE, ncol = 2)
+ggsave("differentiation_signature.pdf", height = 10, width = 12)
+
+FeaturePlot(int_cd3, c("CCL3", "CCL4", "CCL20", "IFNG", "IL10", "TNF"), order = TRUE, ncol = 2)
+ggsave("cytokine_signature.pdf", height = 15, width = 12)
+
+FeaturePlot(int_cd3, c("LAG3", "CD226", "HAVCR2"), order = TRUE, ncol = 2)
+ggsave("inhibitory_signature.pdf", height = 10, width = 12)
+```
+
+# cluster markers
+
+```{r}
+# cluster markers
+markers <- FindAllMarkers(int_cd3, 
+                          group.by = "celltype", 
+                          only.pos = T, logfc.threshold = 0.5)
+top20s <- markers %>% group_by(cluster) %>% dplyr::slice(1:20) %>% pull(gene) %>% unique()
+
+g <- DoHeatmap(int_cd3, group.by = "celltype", features = top20s, raster = FALSE, size = 3) + theme(axis.text.y = element_text(size = 4)) + guides(color = FALSE) + labs(fill = "Expr")
+ggsave("heatmap_celltypemarkers_resize_final.pdf", g, width = 5, height = 5)
+
+Idents(int_cd3) <- "seurat_clusters"
+markers_c <- FindAllMarkers(int_cd3, 
+                            group.by = "seurat_clusters", 
+                            only.pos = T, logfc.threshold = 0.5)
+top20s_c <- markers_c %>% group_by(cluster) %>% dplyr::slice(1:20) %>% pull(gene) %>% unique()
+markers_c %>% filter(p_val_adj <= 0.01) %>% 
+  select(cluster, gene, everything(), -p_val) %>% write_tsv("cluster_markers.tsv")
+
+Idents(int_cd3) <- "clusters"
+levels(int_cd3) <- c("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11")
+g <- DoHeatmap(int_cd3, features = top20s, raster = FALSE, size = 3) + theme(axis.text.y = element_text(size = 4))
+ggsave("heatmap_clustermarkers_resize.pdf", g, width = 5, height = 5)
+```
+
+# condition comp
+
+```{r}
+int_cd3$type2 = int_cd3@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+int_cd4 <- subset(int_cd3, subset = celltype == "CD4")
+int_treg <- subset(int_cd3, subset = celltype == "Treg")
+int_treg <- ScaleData(int_treg, assay = "RNA")
+Idents(int_cd4) <- "type"
+m1 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "CBD", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m2 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "healthy",
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m3 <- FindMarkers(int_cd4, ident.1 = "CBD", ident.2 = "healthy", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+
+top20s <- c(m1 %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene),
+            m2 %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene),
+            m3 %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene)) %>%
+  unique()
+mat <- FetchData(int_cd4, top20s, slot = "scale.data") %>% t()
+h <- ComplexHeatmap::Heatmap(mat)
+top20s_order <- ComplexHeatmap::row_order(h)
+
+g <- DoHeatmap(int_cd4, group.by = "type", features = top20s[top20s_order], assay = "RNA") 
+ggsave("cd4_typecomp_heatmap_top20.tiff", g, width = 15, height = 15)
+```
+
+```{r}
+int_cd3$type2 = int_cd3@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+# int_cd4 <- subset(int_cd3, subset = celltype == c("CD4", "Treg"))
+# int_treg <- subset(int_cd3, subset = celltype == "Treg")
+# int_treg <- ScaleData(int_treg, assay = "RNA")
+
+int_treg <- subset(int_cd3, subset = celltype == "Treg")
+int_treg <- ScaleData(int_treg, assay = "RNA")
+int_treg$type2 = int_treg@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+Idents(int_treg) <- "type2"
+m2 <- FindMarkers(int_treg, ident.1 = "disease", ident.2 = "healthy", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene") %>% 
+  filter(p_val_adj <= 0.01)
+
+Idents(int_cd4) <- "type2"
+m1 <- FindMarkers(int_cd4, ident.1 = "disease", ident.2 = "healthy", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene") %>% 
+  filter(p_val_adj <= 0.01)
+
+top20s <- c(m1 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC > 0) %>% dplyr::slice(1:30) %>% pull(gene),
+            m2 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC > 0) %>% dplyr::slice(1:10) %>% pull(gene),
+            m1 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC < 0) %>% dplyr::slice(1:30) %>% pull(gene),
+            m2 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC < 0) %>% dplyr::slice(1:10) %>% pull(gene)) %>%
+  unique()
+top20s <- c(m1 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC > 0) %>% dplyr::slice(1:30) %>% pull(gene),
+            m1 %>% filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+              group_by(avg_log2FC < 0) %>% dplyr::slice(1:30) %>% pull(gene)) %>%
+  unique()
+mat <- FetchData(int_cd4, top20s, slot = "scale.data") %>% t()
+h <- ComplexHeatmap::Heatmap(mat)
+top20s_order <- ComplexHeatmap::row_order(h)
+
+g <- DoHeatmap(int_cd4, group.by = "type2", features = top20s[top20s_order], assay = "RNA", raster = FALSE, size = 3) + theme(axis.text.y = element_text(size = 4)) + guides(color = FALSE) + labs(fill = "Expr")
+ggsave("cd4treg_typecomp_heatmap_top20_resize_final.pdf", g, width = 5, height = 5)
+
+```
+
+```{r}
+Idents(int_cd4) <- "type2"
+m1 <- FindMarkers(int_cd4, ident.1 = "disease", ident.2 = "healthy") %>% 
+  rownames_to_column("gene")
+m1 %>% write_tsv("disease_vs_healthy_cd4.tsv")
+
+m1 %>% filter(p_val_adj <= 0.01) %>% mutate(fc = avg_log2FC < 0) %>% 
+  group_by(fc) %>% 
+  arrange(p_val_adj, desc(fc), .by_group = TRUE) %>% 
+  ungroup() %>% 
+  select(gene, avg_log2FC, p_val_adj, pct.1, pct.2) %>% write_tsv("disease_vs_healthy_cd4treg.tsv")
+m1 <- read_tsv("disease_vs_healthy_cd4.tsv")
+
+library(gprofiler2)
+res1 <- gost(query = m1 %>% dplyr::filter(p_val_adj <= 0.01, avg_log2FC > 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       dplyr::slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  dplyr::filter(intersection_size > 2)
+res1 %>% write_tsv("GO_disease_high_control_low.tsv")
+
+res2 <- gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>%
+       dplyr::filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       dplyr::slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  dplyr::filter(intersection_size > 2) 
+res2 %>% 
+  write_tsv("GO_disease_low_control_high.tsv")
+
+Idents(int_cd4) <- "type"
+m1 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "CBD") %>% 
+  rownames_to_column("gene")
+res3 <- gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) 
+res3 %>% 
+  write_tsv("GO_BeS_high_CBD_low.tsv")
+res4 <- gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) 
+res4 %>% 
+  write_tsv("GO_BeS_low_CBD_high.tsv")
+
+g <- bind_rows(
+    res1 %>% 
+      dplyr::filter(!str_detect(term_name, "eutrophil")) %>% 
+      dplyr::filter(!str_detect(term_name, "yeloid")) %>% 
+      dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      dplyr::select(term_name, minuslog10) %>% 
+      mutate(group = "disease>healthy"),
+    res2 %>% 
+      dplyr::filter(!str_detect(term_name, "eutrophil")) %>% 
+      dplyr::filter(!str_detect(term_name, "yeloid")) %>% 
+      dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      dplyr::select(term_name, minuslog10) %>% 
+      mutate(group = "disease<healthy")
+  ) %>% 
+    arrange(desc(minuslog10)) %>% 
+    mutate(group = factor(group, levels = c("disease>healthy", "disease<healthy"))) %>% 
+    ungroup() %>% 
+    mutate(term = str_c(term_name, group, sep = "_")) %>% 
+    ggplot(aes(x = minuslog10, y = reorder(term, minuslog10), fill = group)) +
+    geom_col() +
+    facet_wrap(.~group, ncol = 1, scales="free") +
+    theme_classic() +
+    scale_y_discrete(labels = function(x) str_remove(x, "_.+")) +
+    ylab("") +
+  theme(legend.position = "NA")
+ggsave("GO5_disease_healthy_resized_final.pdf", g, width = 5, height = 4)
+
+g <- bind_rows(
+    res3 %>% dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "BeS>CBD"),
+    res4 %>% dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "BeS<CBD")
+  ) %>% 
+    arrange(desc(minuslog10)) %>% 
+    mutate(group = factor(group, levels = c("BeS>CBD", "BeS<CBD"))) %>% 
+    ungroup() %>% 
+    mutate(term = str_c(term_name, group, sep = "_")) %>% 
+    ggplot(aes(x = minuslog10, y = reorder(term, minuslog10), fill = group)) +
+    geom_col() +
+    facet_wrap(.~group, ncol = 1, scales="free_y") +
+    theme_classic() +
+    scale_y_discrete(labels = function(x) str_remove(x, "_.+")) +
+    ylab("GO_BP")
+ggsave("GO5_BeS_CBD.pdf", g, width = 8, height = 6)
+
+
+```
+
+```{r}
+Idents(int_treg) <- "type2"
+m1 <- FindMarkers(int_treg, ident.1 = "disease", ident.2 = "healthy") %>% 
+  rownames_to_column("gene")
+m1 %>% write_tsv("disease_vs_healthy_treg.tsv")
+
+library(gprofiler2)
+res1 <- gost(query = m1 %>% filter(p_val_adj <= 0.05, avg_log2FC > 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2)
+res1 %>% write_tsv("GO_disease_high_control_low_treg.tsv")
+
+res2 <- gost(query = m1 %>% filter(p_val_adj <= 0.05, avg_log2FC < 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) 
+res2 %>% 
+  write_tsv("GO_disease_low_control_high_treg.tsv")
+
+Idents(int_treg) <- "type"
+m1 <- FindMarkers(int_treg, ident.1 = "BeS", ident.2 = "CBD") %>% 
+  rownames_to_column("gene")
+res3 <- gost(query = m1 %>% filter(p_val_adj <= 0.1, avg_log2FC > 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) 
+res3 %>% 
+  write_tsv("GO_BeS_high_CBD_low.tsv")
+res4 <- gost(query = m1 %>% filter(p_val_adj <= 0.1, avg_log2FC < 0) %>%
+       filter(!(str_sub(gene, 1, 3) %in% c("RPL", "RPS"))) %>%
+       slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) 
+res4 %>% 
+  write_tsv("GO_BeS_low_CBD_high.tsv")
+
+g <- bind_rows(
+    res1 %>% dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "disease>healthy"),
+    res2 %>% dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "disease<healthy")
+  ) %>% 
+    arrange(desc(minuslog10)) %>% 
+    mutate(group = factor(group, levels = c("disease>healthy", "disease<healthy"))) %>% 
+    ungroup() %>% 
+    mutate(term = str_c(term_name, group, sep = "_")) %>% 
+    ggplot(aes(x = minuslog10, y = reorder(term, minuslog10), fill = group)) +
+    geom_col() +
+    facet_wrap(.~group, ncol = 1, scales="free_y") +
+    theme_classic() +
+    scale_y_discrete(labels = function(x) str_remove(x, "_.+")) +
+    ylab("GO_BP")
+ggsave("GO5_disease_healthy_treg.pdf", g, width = 8, height = 6)
+
+g <- bind_rows(
+    # res3 %>% dplyr::slice(1:10) %>%
+    #   mutate(minuslog10 = -log10(p_value)) %>%
+    #   select(term_name, minuslog10) %>% 
+    #   mutate(group = "BeS>CBD"),
+    res4 %>% dplyr::slice(1:10) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "BeS<CBD")
+  ) %>% 
+    arrange(desc(minuslog10)) %>% 
+    mutate(group = factor(group, levels = c("BeS>CBD", "BeS<CBD"))) %>% 
+    ungroup() %>% 
+    mutate(term = str_c(term_name, group, sep = "_")) %>% 
+    ggplot(aes(x = minuslog10, y = reorder(term, minuslog10), fill = group)) +
+    geom_col() +
+    facet_wrap(.~group, ncol = 1, scales="free_y") +
+    theme_classic() +
+    scale_y_discrete(labels = function(x) str_remove(x, "_.+")) +
+    ylab("GO_BP")
+ggsave("GO5_BeS_CBD_treg.pdf", g, width = 8, height = 6)
+
+
+```
+
+# markers
+
+```{r}
+int_cd4 <- subset(int, subset = celltype == c("CD4", "Treg"))
+int_cd4$type2 <- int_cd4@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+ms <- read_csv("/Users/rf/Downloads/plot_genes.csv", col_names = FALSE) %>%
+  filter(!(X1 %in% c("CD226", "MARCO", "SERPINA", "RPS29", "DUSP1", "S100A6", "LEF1", "TBX21"))) %>% 
+  pull(X1) %>% 
+  unique()
+# ms <- c(ms, c("CCR7", "CD81"))
+Idents(int_cd4) <- "type2"
+po <- FindAllMarkers(int_cd4)
+pvals <- read_tsv("/Users/rf/atif/disease_vs_healthy_cd4treg.tsv")
+for (x in ms) {
+  pval <- pvals %>% filter(gene == x) %>% pull(p_val_adj)
+  if (length(pval) == 0) {
+    pval <- "insig"
+  } else {
+    pval <- pval %>% formatC(format = "e", digits = 1)
+  }
+  g1 <- VlnPlot(int_cd4, group.by = "type2", x, combine = FALSE, pt.size = 0.1)[[1]] +
+    ylab("Expression") + theme(axis.text.x = element_text(angle = 0, hjust = 0.5), axis.title.x = element_blank()) +
+    labs(subtitle = pval) +
+    theme(plot.subtitle = element_text(hjust = 0.5), plot.title = element_text(face = "italic")) +
+    NoLegend()
+    
+  g2 <- FeaturePlot(int_cd4, x, order = TRUE, combine = FALSE)[[1]]
+  #ggsave(paste0(x, "_plots_cd4treg.pdf"), cowplot::plot_grid(g1, g2, ncol = 2), width = 9, height = 4)
+  cowplot::save_plot(paste0(x, "_plots_cd4treg.pdf"), 
+                     cowplot::plot_grid(g1, g2, ncol = 2),
+                     base_asp = 3, base_height = 2.5)
+}
+
+cowplot::save_plot("atif_example.pdf", cowplot::plot_grid(g1, g2, ncol = 2), base_asp = 2)
+cowplot::save_plot("atif_example_3.5.pdf", cowplot::plot_grid(g1, g2, ncol = 2), base_asp = 3, base_height = 3.5)
+
+Idents(int_cd4) <- "clusters"
+levels(int_cd4) <- rev(sort(levels(int_cd4)))
+h <- ComplexHeatmap::Heatmap(FetchData(int_cd4, ms))
+gorder <- ComplexHeatmap::column_order(h)
+g <- DotPlot(int_cd4, features = ms[gorder]) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(axis.title.x = element_blank())
+cowplot::save_plot("dotplot_cd4treg_renamed.pdf", 
+                     g,
+                     base_asp = 3.5, base_height = 4)
+ggsave("dotplot_cd4treg.pdf", width = 10, height = 4)
+
+g <- DotPlot(int_cd4, features = ms[order(ms)]) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1, face = "italic")) +
+  theme(axis.title.x = element_blank())
+cowplot::save_plot("dotplot_cd4treg_renamed_alphabet_final.pdf", 
+                     g,
+                     base_asp = 3.5, base_height = 4)
+
+# pval
+ms2 <- FindAllMarkers(int_cd4, features = ms, only.pos = T, min.pct = 0, logfc.threshold = 0,
+                      return.thresh = 1)
+ms3 <- ms2 %>% group_by(gene) %>% summarize(q = min(p_val_adj)) %>% 
+  arrange(q) %>% 
+  pull(gene)
+g <- DotPlot(int_cd4, features = c(ms3, setdiff(ms, ms3))) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(axis.title.x = element_blank())
+cowplot::save_plot("dotplot_cd4treg_renamed_pval.pdf", 
+                     g,
+                     base_asp = 3.5, base_height = 4)
+
+
+ms4 <- ms2 %>% select(gene, cluster) %>% 
+  mutate(n = as.character(cluster)) %>% 
+  mutate(cluster = n) %>% 
+  pivot_wider(names_from = cluster, values_from = n, values_fill = "", names_sort = TRUE) %>% 
+  column_to_rownames("gene")
+ms5 <- apply(ms4, MARGIN = 1, FUN = function(x) str_c(x, collapse = "")) %>% sort() %>% names()
+g <- DotPlot(int_cd4, features = c(ms5, setdiff(ms, ms5))) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(axis.title.x = element_blank())
+cowplot::save_plot("dotplot_cd4treg_renamed_clusterorder.pdf", 
+                     g,
+                     base_asp = 3.5, base_height = 4)
+```
+
+
+```{r}
+int_treg <- subset(int_cd3, subset = celltype == "Treg")
+int_treg <- ScaleData(int_treg, assay = "RNA")
+Idents(int_treg) <- "type"
+m1 <- FindMarkers(int_treg, ident.1 = "BeS", ident.2 = "CBD", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m2 <- FindMarkers(int_treg, ident.1 = "BeS", ident.2 = "healthy",
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m3 <- FindMarkers(int_treg, ident.1 = "CBD", ident.2 = "healthy", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+
+top20s <- c(m1 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene),
+            m2 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene),
+            m3 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene)) %>%
+  unique()
+mat <- FetchData(int_treg, top20s, slot = "scale.data") %>% t()
+h <- ComplexHeatmap::Heatmap(mat)
+top20s_order <- ComplexHeatmap::row_order(h)
+
+g <- DoHeatmap(int_treg, group.by = "type", features = top20s[top20s_order], assay = "RNA")
+ggsave("treg_typecomp_heatmap_top20_new.tiff", g, width = 15, height = 15)
+```
+
+# go terms
+
+```{r}
+int_cd4 <- subset(int_cd3, subset = celltype == "CD4")
+int_treg <- ScaleData(int_treg, assay = "RNA")
+Idents(int_cd4) <- "type"
+m1 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "CBD", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m2 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "healthy",
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+m3 <- FindMarkers(int_cd4, ident.1 = "CBD", ident.2 = "healthy", 
+                  logfc.threshold = 0.5) %>% 
+  rownames_to_column("gene")
+
+library(gprofiler2)
+
+gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_BeS_high_CBD_low.tsv")
+
+gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_CBD_high_BeS_low.tsv")
+
+gost(query = m2 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_BeS_high_healthy_low.tsv")
+
+gost(query = m2 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_healthy_high_BeS_low.tsv")
+
+gost(query = m3 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_CBD_high_healthy_low.tsv")
+
+gost(query = m3 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% slice(1:200) %>% pull(gene), 
+                      organism = "hsapiens",
+                      sources = "GO:BP", 
+                      correction_method = "fdr",
+                      evcodes = TRUE)$result %>% 
+  select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+  filter(intersection_size > 2) %>% 
+  write_tsv("GO_healthy_high_CBD_low.tsv")
+```
+
+
+```{r}
+m1 <- sapply(int_cd3_sub@meta.data$celltype %>% as.character() %>% unique(), function(x) {
+  temp <- subset(int_cd3_sub, subset = celltype == x)
+  Idents(temp) <- "type"
+  FindMarkers(temp, ident.1 = "BeS", ident.2 = "CBD") %>% rownames_to_column("gene") %>% 
+    mutate(cluster = x)
+}, simplify = FALSE)
+
+m1 <- do.call(rbind, m1) %>% as.data.frame() 
+m1 %>% write_tsv("BeS_vs_CBD.tsv")
+
+m2 <- sapply(int_cd3_sub@meta.data$celltype %>% as.character() %>% unique(), function(x) {
+  temp <- subset(int_cd3_sub, subset = celltype == x)
+  Idents(temp) <- "type"
+  FindMarkers(temp, ident.1 = "BeS", ident.2 = "healthy") %>% rownames_to_column("gene") %>% 
+    mutate(cluster = x)
+}, simplify = FALSE)
+
+m2 <- do.call(rbind, m2) %>% as.data.frame() 
+m2 %>% write_tsv("BeS_vs_healthy.tsv")
+
+m3 <- sapply(int_cd3_sub@meta.data$celltype %>% as.character() %>% unique(), function(x) {
+  temp <- subset(int_cd3_sub, subset = celltype == x)
+  Idents(temp) <- "type"
+  FindMarkers(temp, ident.1 = "CBD", ident.2 = "healthy") %>% rownames_to_column("gene") %>% 
+    mutate(cluster = x)
+}, simplify = FALSE)
+
+m3 <- do.call(rbind, m3) %>% as.data.frame() 
+m3 %>% write_tsv("CBD_vs_healthy.tsv")
+
+top20s <- c(m1 %>% group_by(cluster) %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene),
+            m2 %>% group_by(cluster) %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene),
+            m3 %>% group_by(cluster) %>% group_by(avg_log2FC > 0) %>% slice(1:20) %>% pull(gene)) %>% unique()
+g <- DoHeatmap(int_cd3_sub, group.by = "type", features = top20s, assay = "RNA")
+ggsave("heatmap_top20.tiff", g, width = 15, height = 15)
+```
+
+# slingshot
+
+```{r}
+int <- readRDS("int_cd3_053121.rds")
+
+library(slingshot)
+library(RColorBrewer)
+library(bioc2020trajectories)
+library(SingleCellExperiment)
+
+int_cd4 <- subset(int, subset = celltype == c("CD4", "Treg"))
+int_cd4_backup <- int_cd4
+# int_cd4 <- subset(int_cd4, subset = clusters == c("1", "2", "3", "4"))
+int_cd4$type2 <- int_cd4@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+
+int_cd4$integrated_snn_res.1 <- factor(int_cd4$integrated_snn_res.1, levels = sort(unique(int_cd4$integrated_snn_res.1)))
+sce <- as.SingleCellExperiment(int_cd4)
+
+# check for imbalance in integrated
+scores <- bioc2020trajectories::imbalance_score(
+  rd = reducedDims(sce)$UMAP, 
+  cl = colData(sce)$type,
+  k = 20, smooth = 40)
+
+grad <- viridis::plasma(10, begin = 0, end = 1)
+names(grad) <- levels(cut(scores$scaled_scores, breaks = 10))
+plot(reducedDims(sce)$UMAP, col = grad[cut(scores$scaled_scores, breaks = 10)],
+     asp = 1, pch = 16, xlab = "UMAP-1", ylab = "UMAP-2", cex = .8)
+legend("topleft", legend = names(grad), col = grad, pch = 16, bty = "n", cex = 2 / 3)
+
+# sling, 1, 2, 3, 5, 6, 9
+sce2 <- suppressWarnings(slingshot(
+  sce,
+  reducedDim = 'UMAP',
+  clusterLabels = 'clustersn', 
+  start.clus = "1",
+  extend='n',
+  stretch = 1
+))
+
+Idents(int_cd4) <- "clustersn"
+levels(int_cd4) <- sort(levels(int_cd4))
+p <- DimPlot(int_cd4,
+             combine = FALSE)
+
+curves <- slingCurves(SlingshotDataSet(sce2), as.df = TRUE)
+p[[1]] + geom_path(data = curves %>% arrange(Order), arrow = arrow(),
+              aes(group = Lineage, x = UMAP_1, y = UMAP_2)) 
+
+ggsave("notreg_line_cluster5_renamed.pdf", width = 4, height = 4)
+
+int_cd4$pseudotime1 <- sce2$slingPseudotime_1
+int_cd4$pseudotime2 <- sce2$slingPseudotime_2
+FeaturePlot(int_cd4, c("pseudotime1", "pseudotime2"))
+
+int_cd4@meta.data$pseudotime <- int_cd4@meta.data %>% 
+  mutate(pseudo = case_when(
+    is.na(pseudotime1) ~ pseudotime2,
+    is.na(pseudotime2) ~ pseudotime1,
+    TRUE ~ (pseudotime1 + pseudotime2) / 2
+  )) %>% pull(pseudo)
+
+g <- FeaturePlot(int_cd4, c("pseudotime"), order = TRUE, cols = c("white", "red"), label = TRUE) +
+    theme(plot.title = element_text(face = "plain")) +
+  labs(color = "pseudotime")
+ggsave("withtreg_pseudo_cluster5.pdf", width = 8, height = 8)
+cowplot::save_plot("withtreg_pseudo_cluster5_final.pdf", g, base_asp = 1.2, base_height = 4)
+# DE
+set.seed(3)
+
+library(tradeSeq)
+
+genes <- c(VariableFeatures(FindVariableFeatures(int_cd4, assay = "RNA")), ms) %>% unique()
+sce3 <- tradeSeq::fitGAM(
+  counts = int_cd4@assays$RNA@counts[genes,],
+  pseudotime = slingPseudotime(sce2, na = FALSE),
+  cellWeights = slingCurveWeights(sce2),
+  #conditions = factor(ifelse(colData(sce)$type == "healthy", "healthy", "patient")),
+  nknots = 5
+  )
+
+# test for dynamic expression
+rowData(sce3)$assocRes <- associationTest(sce3, lineages = TRUE, l2fc = log2(2))
+rowData(sce3)$assocRes <- associationTest(sce3, lineages = FALSE, l2fc = log2(2))
+
+assocRes <- rowData(sce3)$assocRes
+
+mockGenes <-  rownames(assocRes)[
+  which(p.adjust(assocRes$pvalue_lineage1_conditionhealthy, "fdr") <= 0.01)
+]
+tgfbGenes <-  rownames(assocRes)[
+  which(p.adjust(assocRes$pvalue_lineage1_conditionpatient, "fdr") <= 0.001)
+]
+
+yhatSmooth <- predictSmooth(sce3, gene = mockGenes, nPoints = 500, tidy = FALSE)
+yhatSmooth2 <- predictSmooth(sce3, gene = tgfbGenes, nPoints = 500, tidy = FALSE)
+yhatSmooth <- predictSmooth(sce3, gene = intersect(ms, rownames(assocRes)), nPoints = 500, tidy = FALSE)
+
+ha = ComplexHeatmap::HeatmapAnnotation(pseudotime = 1:500)
+set.seed(32)
+res <- t(scale(t(yhatSmooth[, 1:500])))
+maxtime <- sapply(1:nrow(res),
+       function(x) zoo::rollapply(res[x, ], 25, mean, by.column = FALSE) %>% which.max())
+res2 <- res[order(maxtime), ]
+
+h <- ComplexHeatmap::Heatmap(res2,
+                             cluster_rows = FALSE,
+                             cluster_columns = FALSE,
+                             show_row_dend = FALSE,
+                             show_column_names = FALSE,
+                             border = FALSE,
+                             row_names_gp = grid::gpar(fontsize = 8),
+                             top_annotation = ha,
+                             heatmap_legend_param = list(title = "Expression"),
+                             legend_title_gp = gpar(fontface = "plain"))
+pdf("list_pseudotime_heatmap_resized_1234.pdf", width = 6, height = 4)
+h
+dev.off()
+```
+
+# by cluster
+
+```{r}
+int <- readRDS("int_cd3_030821.rds")
+int@meta.data %>% group_by(type, celltype) %>% tally() %>% pivot_wider(names_from = celltype, values_from = n) %>% select(type, CD4, Treg)
+# A tibble: 3 x 3
+# Groups:   type [3]
+#   type      CD4  Treg
+#   <chr>   <int> <int>
+# 1 BeS       439    18
+# 2 CBD      1019    58
+# 3 healthy  2797   175
+
+int_cd4 <- subset(int, subset = celltype == "CD4")
+DimPlot(int_cd4, group.by = "seurat_clusters", label = T)
+
+for (x in c(1,2,3,5,6)) {
+  int_t<- subset(int_cd4, subset = seurat_clusters == x)
+  int_t <- ScaleData(int_t, assay = "RNA")
+  Idents(int_t) <- "type"
+  m1 <- FindMarkers(int_t, ident.1 = "BeS", ident.2 = "CBD", 
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+  m2 <- FindMarkers(int_t, ident.1 = "BeS", ident.2 = "healthy",
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+  m3 <- FindMarkers(int_t, ident.1 = "CBD", ident.2 = "healthy", 
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+  
+  top20s <- c(m1 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene),
+              m2 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene),
+              m3 %>% group_by(avg_log2FC > 0) %>% filter(p_val_adj < 0.01) %>% slice(1:20) %>% pull(gene)) %>%
+    unique()
+  mat <- FetchData(int_t, top20s, slot = "scale.data") %>% t()
+  h <- ComplexHeatmap::Heatmap(mat)
+  top20s_order <- ComplexHeatmap::row_order(h)
+  
+  g <- DoHeatmap(int_t, group.by = "type", features = top20s[top20s_order], assay = "RNA")
+  ggsave(paste0(x, "_typecomp_heatmap_top20_new.tiff"), g, width = 15, height = 15)
+}
+```
+
+```{r}
+library(gprofiler2)
+int_cd4 <- subset(int, subset = celltype == "CD4")
+int_cd4_back <- int_cd4
+# 
+for (x in c(1,2,3,5,6)) {
+  int_cd4 <- subset(int_cd4_back, subset = seurat_clusters == x)
+  int_cd4 <- ScaleData(int_cd4, assay = "RNA")
+  Idents(int_cd4) <- "type"
+  m1 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "CBD", 
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+  m2 <- FindMarkers(int_cd4, ident.1 = "BeS", ident.2 = "healthy",
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+  m3 <- FindMarkers(int_cd4, ident.1 = "CBD", ident.2 = "healthy", 
+                    logfc.threshold = 0.5) %>% 
+    rownames_to_column("gene")
+
+  res1 <- gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2)
+  #res1 %>% write_tsv(paste0(x, "GO_BeS_high_CBD_low.tsv"))
+
+  res2 <- gost(query = m1 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2) 
+  #res2 %>% write_tsv(paste0(x, "GO_CBD_high_BeS_low.tsv"))
+
+  res3 <- gost(query = m2 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2) 
+  #res3 %>% write_tsv(paste0(x, "GO_BeS_high_healthy_low.tsv"))
+
+  res4 <- gost(query = m2 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2)
+  #res4 %>% write_tsv(paste0(x, "GO_healthy_high_BeS_low.tsv"))
+
+  res5 <- gost(query = m3 %>% filter(p_val_adj <= 0.01, avg_log2FC > 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2) 
+  #res5 %>% write_tsv(paste0(x, "GO_CBD_high_healthy_low.tsv"))
+
+  res6 <- gost(query = m3 %>% filter(p_val_adj <= 0.01, avg_log2FC < 0) %>% dplyr::slice(1:200) %>% pull(gene), 
+                        organism = "hsapiens",
+                        sources = "GO:BP", 
+                        correction_method = "fdr",
+                        evcodes = TRUE)$result %>% 
+    dplyr::select(term_id, term_name, p_value, intersection_size, intersection) %>% 
+    dplyr::filter(intersection_size > 2) 
+  #res6 %>% write_tsv(paste0(x, "GO_healthy_high_CBD_low.tsv"))
+  g <- bind_rows(
+    res3 %>% dplyr::slice(1:5) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "BeS>healthy"),
+    res4 %>% dplyr::slice(1:5) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "BeS<healthy"),
+    res5 %>% dplyr::slice(1:5) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "CBD>healthy"),
+    res6 %>% dplyr::slice(1:5) %>%
+      mutate(minuslog10 = -log10(p_value)) %>%
+      select(term_name, minuslog10) %>% 
+      mutate(group = "CBD<healthy")
+  ) %>% 
+    arrange(desc(minuslog10)) %>% 
+    mutate(group = factor(group, levels = c("BeS>healthy", "CBD>healthy", "BeS<healthy", "CBD<healthy"))) %>% 
+    ungroup() %>% 
+    mutate(term = str_c(term_name, group, sep = "_")) %>% 
+    ggplot(aes(x = minuslog10, y = reorder(term, minuslog10), fill = group)) +
+    geom_col() +
+    facet_wrap(.~group, ncol = 1, scales="free_y") +
+    theme_classic() +
+    scale_y_discrete(labels = function(x) str_remove(x, "_.+")) +
+    ylab("GO_BP")
+  ggsave(paste0(x, "GO5.pdf"), g, width = 8, height = 6)
+}
+int_cd4 <- int_cd4_back
+```
+
+# pvals
+
+```{r}
+int_cd4 <- subset(int, subset = celltype == c("CD4", "Treg"))
+int_cd4$type2 <- int_cd4@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+Idents(int_cd4) <- "type2"
+m <- FindMarkers(int_cd4, ident.1 = "disease", ident.2 = "healthy", logfc.threshold = 0, min.pct = 0)
+m %>% rownames_to_column("gene") %>% filter(gene %in% ms) %>% 
+  write_tsv("pval_markers.tsv")
+```
+```{r}
+int_cd4 <- subset(int_cd3, subset = celltype == c("CD4", "Treg"))
+int_cd4$type2 <- int_cd4@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+Idents(int_cd4) <- "type2"
+m <- FindMarkers(int_cd4, ident.1 = "disease", ident.2 = "healthy")
+ggplot(m %>% mutate(minuslog10p = -log10(p_val_adj)),
+       aes(x = avg_log2FC, y = minuslog10p)) +
+  geom_point()
+```
+
+# rev
+1.frac
+```{r}
+int <- readRDS("int_cd3_053121.rds")
+int$type2 <- int@meta.data %>% mutate(type2 = ifelse(type == "healthy", "healthy", "disease")) %>% pull(type2)
+frac <- int@meta.data %>% group_by(clusters, type2) %>% 
+  summarize(n = n()) %>% 
+  group_by(type2) %>% 
+  mutate(frac = n/sum(n)) %>% 
+  mutate(clusters = factor(clusters, levels = c("CD4_1", "CD4_2", "CD4_3", "CD4_4", "CD4_5", "Treg_6", "CD8_7", "CD8_8", "CD8_9", "NK_10", "X")))
+
+ggplot(frac, aes(y = frac, fill = clusters, x = type2)) +
+  geom_col(color = "black") +
+  theme_classic() +
+  xlab("") +
+  ylab("fraction")
+
+ggsave("cluster_fractions.pdf", width = 4, height = 4)
+
+frac_wide <- frac %>% pivot_wider(-n, names_from = clusters, values_from = frac) %>% 
+  select(condition = type2, c("CD4_1", "CD4_2", "CD4_3", "CD4_4", "CD4_5", "Treg_6", "CD8_7", "CD8_8", "CD8_9", "NK_10", "X"))
+write_tsv(frac_wide, "cluster_fractions.tsv")
+```
+2.batch
+```{r}
+merge <- readRDS("mergeall.rds")
+merge$sample <- factor(merge$orig.ident, levels = c("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "s29", "s45"))
+a <- DimPlot(merge, label = F, group.by = "sample") +
+    theme(plot.title = element_text(face = "plain"))
+b <- FeaturePlot(merge, "CD3D") +
+    theme(plot.title = element_text(face = "plain")) + labs(color='Expr')
+p <- cowplot::plot_grid(a, b)
+# ggsave("with_integration_nolab.pdf", height = 6, width = 12)
+ggsave("without_integration.pdf", p, height = 4, width = 8)
+
+Idents(merge) <- "seurat_clusters"
+merge_cd3 <- subset(merge, idents = c(11,13,15,23))
+merge_cd3<- RunPCA(merge_cd3, npcs = 30, verbose = FALSE)
+merge_cd3  <- RunUMAP(merge_cd3 , reduction = "pca", dims = 1:30)
+merge_cd3  <- FindNeighbors(object = merge_cd3 , dims = 1:30)
+merge_cd3  <- FindClusters(merge_cd3, dims.use = 1:40, resolution = 1)
+a <- DimPlot(merge_cd3, label = F, group.by = "sample") +
+    theme(plot.title = element_text(face = "plain"))
+b <- FeaturePlot(merge_cd3, "CD3D") +
+    theme(plot.title = element_text(face = "plain")) + labs(color='Expr')
+p <- cowplot::plot_grid(a, b)
+# ggsave("with_integration_nolab.pdf", height = 6, width = 12)
+ggsave("without_integration_cd3.pdf", a, height = 4, width = 4)
+```
+
+marker
+```{r}
+int_cd8 <- subset(int, subset = celltype == c("CD8"))
+Idents(int_cd8) <- "type2"
+m8 <- FindMarkers(int_cd8, ident.1 = "disease", ident.2 = "healthy", logfc.threshold = 0) %>% 
+  rownames_to_column("gene")
+
+write_tsv(m8, "cd8_disease_vs_healthy.tsv")
+goi <- m8$gene[1:15]
+tab2 <- m8 %>% mutate(log = -log10(p_val_adj)) %>% 
+  mutate(group = case_when(
+    log < 10 ~ "insig",
+    avg_log2FC >= 0.5 ~ "up",
+    avg_log2FC <= -0.5 ~ "down",
+    TRUE ~ "minimal"
+  )) %>% 
+  mutate(group = factor(group, levels = c("up", "down", "minimal", "insig"))) %>% 
+  mutate(text = ifelse(gene %in% goi, gene, ""))
+
+g <- ggplot(tab2, aes(x = avg_log2FC, y = log)) +
+  geom_point(aes(color = group)) +
+  geom_text_repel(aes(label = text), max.overlaps = 2000, min.segment.length = 0.1, force = 10, force_pull = 0.25, box.padding = 0.5, point.padding = 0.5, max.time = 2, max.iter = 100000) +
+  scale_color_manual(values = c("insig" = "gray", "minimal" = "dark gray", "up" = "red", "down" = "blue")) +
+  theme_classic() +
+  xlab("log2 fold change") +
+  ylab("-log10(padj)") + theme(legend.title = element_blank())
+
+g
+
+ggsave("volc_cd8.pdf", g, width = 4, height = 4)
+```
+
+```{r}
+int_nk <- subset(int, subset = celltype == c("NK"))
+Idents(int_nk) <- "type2"
+mnk <- FindMarkers(int_nk, ident.1 = "disease", ident.2 = "healthy", logfc.threshold = 0) %>% 
+  rownames_to_column("gene")
+
+write_tsv(mnk, "NK_disease_vs_healthy.tsv")
+goi <- mnk$gene[1:25]
+tab2 <- mnk %>% mutate(log = -log10(p_val_adj)) %>% 
+  mutate(group = case_when(
+    log < 10 ~ "insig",
+    avg_log2FC >= 0.5 ~ "up",
+    avg_log2FC <= -0.5 ~ "down",
+    TRUE ~ "minimal"
+  )) %>% 
+  mutate(group = factor(group, levels = c("up", "down", "minimal", "insig"))) %>% 
+  mutate(text = ifelse(gene %in% goi, gene, ""))
+
+g <- ggplot(tab2, aes(x = avg_log2FC, y = log)) +
+  geom_point(aes(color = group)) +
+  geom_text_repel(aes(label = text), max.overlaps = 2000, min.segment.length = 0.1, force = 10, force_pull = 0.25, box.padding = 0.5, point.padding = 0.5, max.time = 2, max.iter = 100000) +
+  scale_color_manual(values = c("insig" = "gray", "minimal" = "dark gray", "up" = "red", "down" = "blue")) +
+  theme_classic() +
+  xlab("log2 fold change") +
+  ylab("-log10(padj)") + theme(legend.title = element_blank())
+
+g
+
+ggsave("volc_NK.pdf", g, width = 4, height = 4)
+```
+
+qc
+```{r}
+pall[["percent.mt"]] <- PercentageFeatureSet(pall, pattern = "^MT-")
+saveRDS(pall, "no_filter_forQC.rds")
+pall$samples <- factor(pall$orig.ident, levels = c("s29", "s45", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"))
+Idents(pall) <- "samples"
+p1 <- VlnPlot(pall, "nFeature_RNA", pt.size = 0) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5), axis.title.x = element_blank()) +
+    theme(plot.title = element_text(face = "plain")) +
+    NoLegend() +
+  geom_hline(yintercept = c(7000, 500), color = "gray")
+p2 <- VlnPlot(pall, "nCount_RNA", pt.size = 0) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5), axis.title.x = element_blank()) +
+    theme(plot.title = element_text(face = "plain")) +
+    NoLegend()
+p3 <- VlnPlot(pall, "percent.mt", pt.size = 0) +
+    theme(axis.text.x = element_text(angle = 0, hjust = 0.5), axis.title.x = element_blank()) +
+    theme(plot.title = element_text(face = "plain")) +
+    NoLegend() +
+  geom_hline(yintercept = c(20), color = "gray")
+p <- cowplot::plot_grid(p1, p2, p3, ncol = 1)
+ggsave("QC.pdf", p, height = 8, width = 8)
+```
+
+celldb
+```{r}
+library(sceasy)
+library(reticulate)
+loompy <- reticulate::import('loompy')
+
+sceasy::convertFormat("/Users/rf/Downloads/droplet_normal_lung_blood_scanpy.20200205.RC4.h5ad", 
+                      from="anndata", 
+                      to="seurat",
+                      outFile='lung.rds')
+
+lung <- readRDS("lung.rds")
+lung$celltype <- factor(str_remove(lung$free_annotation, "_P.+"), 
+                        levels = sort(unique(str_remove(lung$free_annotation, "_P.+"))))
+Idents(lung) <- "celltype"
+g <- DimPlot(lung, reduction = "tSNE")
+```
+ ucsc
+```{r}
+merge <- readRDS("mergeall.rds")
+merge <- intall
+DefaultAssay(merge) <- "RNA"
+merge <- NormalizeData(merge)
+merge <- FindVariableFeatures(merge)
+merge <- ScaleData(merge, verbose = FALSE)
+merge <- RunPCA(merge, npcs = 30, verbose = FALSE)
+merge <- RunUMAP(merge, reduction = "pca", dims = 1:30)
+merge <- FindNeighbors(object = merge, dims = 1:30)
+intall <- readRDS("intall.rds")
+intall@reductions$umap_nointegration <- merge@reductions$umap
+markers <- FindAllMarkers(intall, 
+                          group.by = "seurat_clusters", 
+                          only.pos = T, logfc.threshold = 0.5)
+write_tsv(markers, "allcells_markers.tsv")
+
+int <- readRDS("int_cd3_053121.rds")
+int2 <- int
+DefaultAssay(int2) <- "RNA"
+int2 <- NormalizeData(int2)
+int2 <- FindVariableFeatures(int2)
+int2 <- ScaleData(int2, verbose = FALSE)
+int2 <- RunPCA(int2, npcs = 30, verbose = FALSE)
+int2 <- RunUMAP(int2, reduction = "pca", dims = 1:30)
+int2 <- FindNeighbors(object = int2, dims = 1:30)
+int@reductions$umap_nointegration <- int2@reductions$umap
+markers <- FindAllMarkers(int, 
+                          group.by = "celltype", 
+                          only.pos = T, logfc.threshold = 0.5)
+write_tsv(markers, "Cd3_markers.tsv")
+
+library(scbp)
+
+make_cellbrowser(intall,
+                 column_list = c(sample = "orig.ident",
+                                 cluster = "seurat_clusters",
+                                 nCount_RNA = "nCount_RNA",
+                                 nFeature_RNA = "nFeature_RNA",
+                                 percent.mt = "percent.mt"),
+                 outdir = "cellbrowser_allcells",
+                 project = "all_cells",
+                 primary_color_palette = scbp::ilovehue_pal,
+                 marker_file = "/Users/rf/atif/allcells_markers.tsv",
+                 ident = "cluster",
+                 embeddings = c("umap", "umap_nointegration"),
+                 overwrite_cb_config = TRUE,
+                 annotate_markers = TRUE,
+                 default_assay = "RNA",
+                 cellbrowser_dir = "/usr/local/bin/",
+                 description = NULL,
+                 config = NULL,
+                 summary_html_format = "**{title}**  \n{description}")
+
+make_cellbrowser(int,
+                 column_list = c(sample = "orig.ident",
+                                 cluster = "clustersn",
+                                 clusternames = "clusters",
+                                 nCount_RNA = "nCount_RNA",
+                                 nFeature_RNA = "nFeature_RNA",
+                                 percent.mt = "percent.mt",
+                                 condition = "type",
+                                 celltype = "celltype"),
+                 outdir = "cellbrowser_cd3",
+                 project = "cd3",
+                 marker_file = "/Users/rf/atif/Cd3_markers.tsv",
+                 ident = "cluster",
+                 embeddings = c("umap", "umap_nointegration"),
+                 overwrite_cb_config = TRUE,
+                 annotate_markers = TRUE,
+                 default_assay = "RNA",
+                 cellbrowser_dir = "/usr/local/bin/",
+                 description = NULL,
+                 config = NULL,
+                 summary_html_format = "**{title}**  \n{description}")
+
+build_cellbrowser(c("/Users/rf/atif/cellbrowser_cd3/cd3/cellbrowser.conf",
+                    "/Users/rf/atif/cellbrowser_allcells/all_cells/cellbrowser.conf"),
+                  outdir = "/Users/rf/atif/cellbrowser_build",
+                  cbBuild_path = "/usr/local/bin/cbBuild",
+                  command = TRUE)
+
+write_tsv(int@meta.data %>% rownames_to_column("cell") %>%
+            mutate(type2 = ifelse(type == "healthy", "healthy", "disease")),
+          "cd3_metadata.tsv")
+```
+
